@@ -10,7 +10,7 @@ const { story, isFinal, imageUrl, isLoading } = defineProps<{
 }>();
 
 const displayedText = ref(""); // 当前显示的文字
-const typingSpeed = 70; // 打字速度（毫秒/字符）
+const typingSpeed = 50; // 打字速度（毫秒/字符）
 
 // 打字机效果函数
 const startTypingEffect = async () => {

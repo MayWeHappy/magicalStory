@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, PropType } from "vue";
+import { ref, onMounted, onBeforeUnmount, watch, PropType } from "vue";
 import { useAzureSpeechToText } from "../composables/speechAzure";
+import axios from "axios";
 
 // Import child components
 import CharacterSelection from "./CharacterSelection.vue";
@@ -31,7 +32,7 @@ const props = defineProps({
 });
 
 // Emit events to parent
-const emit = defineEmits(["select", "submitSpeech"]);
+const emit = defineEmits(["select", "submitSpeech", "updateStep"]);
 
 // Use composable for speech recognition
 const {
@@ -43,17 +44,36 @@ const {
 } = useAzureSpeechToText();
 
 const handleStartListening = async () => {
+  await openSerialPort();
   startListening(); // Start recording
+  startBlinking(); // 开始闪烁灯
 };
 
 const handleStopListening = async () => {
   console.log("点击结束按钮");
   stopListening(); // Stop recording
+  stopBlinking(); // 停止闪烁灯
+  handleSubmitSpeech(); // 提交语音
 };
 
-// Submit speech content
-const handleSubmitSpeech = () => {
+const handleSubmitSpeech = async () => {
+  await turnOnLight(); // 常亮灯
+  await closeSerialPort(); // 关闭串口
   emit("submitSpeech", userSpeech.value); // Emit textarea content to parent
+
+  // 修改回车键的功能为刷新页面
+  window.removeEventListener("keydown", handleKeydown);
+  window.addEventListener("keydown", handleRestartKeydown);
+};
+
+const handleRestartKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Enter") {
+    window.location.reload(); // 刷新页面
+  }
+};
+
+const handleRestart = () => {
+  window.location.reload(); // 刷新页面
 };
 
 // Handle character/scene selection
@@ -62,7 +82,95 @@ const handleSelection = (type: string, choice: string) => {
 
   // Automatically move to the next step if a character is selected
   if (type === "character") {
-    emit("select", "nextStep", "scene");
+    emit("updateStep", 1); // Move to scene selection step
+  } else if (type === "scene") {
+    emit("updateStep", 2); // Move to speech input step
+  }
+};
+
+// 处理键盘事件
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === "ArrowUp") {
+    handleStartListening();
+  } else if (event.key === "ArrowDown") {
+    handleStopListening();
+  } else if (event.key === "Enter") {
+    handleSubmitSpeech();
+  }
+};
+
+// 监视 currentStep 的变化
+watch(
+  () => props.currentStep,
+  (newStep) => {
+    if (newStep === 2) {
+      window.addEventListener("keydown", handleKeydown);
+    } else {
+      window.removeEventListener("keydown", handleKeydown);
+    }
+  }
+);
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+  window.removeEventListener("keydown", handleRestartKeydown);
+});
+
+// 串口控制函数
+const openSerialPort = async () => {
+  try {
+    await axios.post("http://localhost:5000/open", {
+      port: "COM7", // 根据实际情况修改端口
+      baudrate: 115200,
+    });
+    console.log("串口已打开");
+  } catch (error) {
+    console.error("打开串口时出错:", error);
+  }
+};
+
+const closeSerialPort = async () => {
+  try {
+    await axios.post("http://localhost:5000/close");
+    console.log("串口已关闭");
+  } catch (error) {
+    console.error("关闭串口时出错:", error);
+  }
+};
+
+const turnOnLight = async () => {
+  try {
+    await axios.post("http://localhost:5000/light/on");
+    console.log("灯已打开");
+  } catch (error) {
+    console.error("打开灯时出错:", error);
+  }
+};
+
+const turnOffLight = async () => {
+  try {
+    await axios.post("http://localhost:5000/light/off");
+    console.log("灯已关闭");
+  } catch (error) {
+    console.error("关闭灯时出错:", error);
+  }
+};
+
+let blinkInterval: ReturnType<typeof setInterval> | null = null;
+
+const startBlinking = () => {
+  blinkInterval = setInterval(async () => {
+    await turnOnLight();
+    setTimeout(async () => {
+      await turnOffLight();
+    }, 500);
+  }, 1000);
+};
+
+const stopBlinking = () => {
+  if (blinkInterval) {
+    clearInterval(blinkInterval);
+    blinkInterval = null;
   }
 };
 </script>
@@ -85,9 +193,10 @@ const handleSelection = (type: string, choice: string) => {
     <div v-if="currentStep === 2" class="speech-input">
       <h3>🪄 Speak Your Magic Spell</h3>
       <textarea
-        v-model="userSpeech"
+        :value="userSpeech"
         placeholder="Say your magic spell..."
         rows="3"
+        readonly
       ></textarea>
       <div class="mic-controls">
         <button
@@ -95,7 +204,7 @@ const handleSelection = (type: string, choice: string) => {
           :disabled="isListening"
           class="start-btn"
         >
-          🎙 Start Listening
+          {{ isListening ? "Recording" : "🎙 Start Listening" }}
         </button>
         <button
           @click="handleStopListening"
@@ -105,7 +214,8 @@ const handleSelection = (type: string, choice: string) => {
           ✋ Stop Listening
         </button>
       </div>
-      <button @click="handleSubmitSpeech" class="submit-btn">✨ Submit</button>
+      <button @click="handleSubmitSpeech" class="submit-btn" style="display: none;">✨ Submit</button>
+      <button @click="handleRestart" class="submit-btn" style="visibility: hidden;">🔄 Restart</button>
     </div>
 
     <!-- Error Display -->

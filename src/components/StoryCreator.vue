@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { DotLottieVue } from "@lottiefiles/dotlottie-vue";
 import LeftPanel from "./LeftPanel.vue";
 import StoryOutput from "./StoryOutput.vue";
 import { useStoryGenerator } from "../composables/useStoryGenerator";
+import axios from "axios";
 
 // 右侧面板 ref
 const rightPanel = ref<HTMLElement | null>(null); // 右侧面板 DOM 引用
@@ -45,6 +46,7 @@ const initialImagePrompt =
 
 const startAdventure = () => {
   isStarted.value = true;
+  window.removeEventListener("keydown", handleKeydown); // 移除键盘事件监听器
 };
 
 const proceedToNextStep = () => {
@@ -147,6 +149,54 @@ watch(storyParts, () => {
     rightPanel.value.scrollLeft = rightPanel.value.scrollWidth; // 滚动到最右侧
   }
 });
+
+// 处理键盘事件
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Enter" && !isStarted.value) {
+    startAdventure();
+  }
+};
+
+const openSerialPort = async () => {
+  try {
+    await axios.post("http://localhost:5000/open", {
+      port: "COM7", // 根据实际情况修改端口
+      baudrate: 115200,
+    });
+    console.log("串口已打开");
+  } catch (error) {
+    console.error("打开串口时出错:", error);
+  }
+};
+
+const closeSerialPort = async () => {
+  try {
+    await axios.post("http://localhost:5000/close");
+    console.log("串口已关闭");
+  } catch (error) {
+    console.error("关闭串口时出错:", error);
+  }
+};
+
+const turnOffLight = async () => {
+  try {
+    await axios.post("http://localhost:5000/light/off");
+    console.log("灯已关闭");
+  } catch (error) {
+    console.error("关闭灯时出错:", error);
+  }
+};
+
+onMounted(async () => {
+  window.addEventListener("keydown", handleKeydown);
+  await openSerialPort();
+  await turnOffLight();
+  await closeSerialPort();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+});
 </script>
 
 <template>
@@ -205,8 +255,6 @@ watch(storyParts, () => {
   </div>
 </template>
 
-<style scoped>
-/* 样式保
 <style scoped>
 /* 整体容器样式 */
 .story-app {
@@ -319,7 +367,7 @@ watch(storyParts, () => {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
   color: #ffffff; /* 白色字体 */
   overflow-x: auto; /* 横向滚动条 */
-  overflow-y: hidden; /* 禁用纵向滚动条 */
+  overflow-y: auto; /* 禁用纵向滚动条 */
   white-space: nowrap; /* 确保内容不会换行 */
 }
 

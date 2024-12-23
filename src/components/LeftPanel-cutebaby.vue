@@ -1,0 +1,328 @@
+<script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount, watch, PropType } from "vue";
+import { useAzureSpeechToText } from "../composables/speechAzure";
+import axios from "axios";
+
+// Import child components
+import CharacterSelection from "./CharacterSelection.vue";
+import SceneSelection from "./SceneSelection.vue";
+
+// Define Props interface
+interface Choices {
+  character: string;
+  scene: string;
+  items: string[];
+  storyPath: string;
+}
+
+// Define Props
+const props = defineProps({
+  currentStep: {
+    type: Number,
+    required: true,
+  },
+  selectedChoices: {
+    type: Object as PropType<Choices>,
+    required: true,
+  },
+  error: {
+    type: String,
+    required: false,
+  },
+});
+
+// Emit events to parent
+const emit = defineEmits(["select", "submitSpeech", "updateStep"]);
+
+// Use composable for speech recognition
+const {
+  userSpeech,
+  isListening,
+  startListening,
+  stopListening,
+  error: transcriptionError,
+} = useAzureSpeechToText();
+
+const handleStartListening = async () => {
+  await openSerialPort();
+  startListening(); // Start recording
+  startBlinking(); // 开始闪烁灯
+};
+
+const handleStopListening = async () => {
+  console.log("点击结束按钮");
+  stopListening(); // Stop recording
+  stopBlinking(); // 停止闪烁灯
+};
+
+const handleSubmitSpeech = async () => {
+  await turnOnLight(); // 常亮灯
+  await closeSerialPort(); // 关闭串口
+  emit("submitSpeech", userSpeech.value); // Emit textarea content to parent
+
+  // 修改回车键的功能为刷新页面
+  window.removeEventListener("keydown", handleKeydown);
+  window.addEventListener("keydown", handleRestartKeydown);
+};
+
+const handleRestartKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Enter") {
+    window.location.reload(); // 刷新页面
+  }
+};
+
+const handleRestart = () => {
+  window.location.reload(); // 刷新页面
+};
+
+// Handle character/scene selection
+const handleSelection = (type: string, choice: string) => {
+  emit("select", type, choice);
+
+  // Automatically move to the next step if a character is selected
+  if (type === "character") {
+    emit("updateStep", 1); // Move to scene selection step
+  } else if (type === "scene") {
+    emit("updateStep", 2); // Move to speech input step
+  }
+};
+
+// 处理键盘事件
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === "ArrowUp") {
+    handleStartListening();
+  } else if (event.key === "ArrowDown") {
+    handleStopListening();
+  } else if (event.key === "Enter") {
+    handleSubmitSpeech();
+  }
+};
+
+// 监视 currentStep 的变化
+watch(
+  () => props.currentStep,
+  (newStep) => {
+    if (newStep === 2) {
+      window.addEventListener("keydown", handleKeydown);
+    } else {
+      window.removeEventListener("keydown", handleKeydown);
+    }
+  }
+);
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+  window.removeEventListener("keydown", handleRestartKeydown);
+});
+
+// 串口控制函数
+const openSerialPort = async () => {
+  try {
+    await axios.post("http://localhost:5000/open", {
+      port: "COM7", // 根据实际情况修改端口
+      baudrate: 115200,
+    });
+    console.log("串口已打开");
+  } catch (error) {
+    console.error("打开串口时出错:", error);
+  }
+};
+
+const closeSerialPort = async () => {
+  try {
+    await axios.post("http://localhost:5000/close");
+    console.log("串口已关闭");
+  } catch (error) {
+    console.error("关闭串口时出错:", error);
+  }
+};
+
+const turnOnLight = async () => {
+  try {
+    await axios.post("http://localhost:5000/light/on");
+    console.log("灯已打开");
+  } catch (error) {
+    console.error("打开灯时出错:", error);
+  }
+};
+
+const turnOffLight = async () => {
+  try {
+    await axios.post("http://localhost:5000/light/off");
+    console.log("灯已关闭");
+  } catch (error) {
+    console.error("关闭灯时出错:", error);
+  }
+};
+
+let blinkInterval: ReturnType<typeof setInterval> | null = null;
+
+const startBlinking = () => {
+  blinkInterval = setInterval(async () => {
+    await turnOnLight();
+    setTimeout(async () => {
+      await turnOffLight();
+    }, 500);
+  }, 1000);
+};
+
+const stopBlinking = () => {
+  if (blinkInterval) {
+    clearInterval(blinkInterval);
+    blinkInterval = null;
+  }
+};
+</script>
+
+<template>
+  <div class="left-panel">
+    <!-- Character Selection -->
+    <CharacterSelection
+      v-if="currentStep === 0"
+      @select="(choice) => handleSelection('character', choice)"
+    />
+
+    <!-- Scene Selection -->
+    <SceneSelection
+      v-if="currentStep === 1"
+      @select="(choice) => handleSelection('scene', choice)"
+    />
+
+    <!-- Speech Input -->
+    <div v-if="currentStep === 2" class="speech-input">
+      <h3>🪄 Speak Your Magic Spell</h3>
+      <textarea
+        :value="userSpeech"
+        placeholder="Say your magic spell..."
+        rows="3"
+        readonly
+      ></textarea>
+      <div class="mic-controls">
+        <button
+          @click="handleStartListening"
+          :disabled="isListening"
+          class="start-btn"
+        >
+          {{ isListening ? "Recording" : "🎙 Start Listening" }}
+        </button>
+        <button
+          @click="handleStopListening"
+          :disabled="!isListening"
+          class="stop-btn"
+        >
+          ✋ Stop Listening
+        </button>
+      </div>
+      <button @click="handleSubmitSpeech" class="submit-btn">✨ Submit</button>
+      <button @click="handleRestart" class="submit-btn">🔄 Restart</button>
+    </div>
+
+    <!-- Error Display -->
+    <div v-if="error || transcriptionError" class="error">
+      🚨 {{ error || transcriptionError }}
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.left-panel {
+  flex: 0.3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, #332244, #443355);
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+  color: #fefefe;
+}
+
+.speech-input {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.speech-input h3 {
+  font-size: 1.6rem;
+  color: #ffda79;
+  font-weight: bold;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.speech-input textarea {
+  width: 100%; /* 调整宽度避免 padding 顶出 */
+  padding: 0.8rem;
+  border: 2px solid #ffda79;
+  border-radius: 10px;
+  background-color: #fff;
+  resize: none;
+  font-size: 1.2rem;
+  font-family: "Arial", sans-serif;
+  color: #333;
+  box-sizing: border-box; /* 确保 padding 不会影响宽度 */
+  margin: 0; /* 确保没有额外的 margin 顶出 */
+}
+
+.mic-controls {
+  display: flex;
+  gap: 1rem;
+}
+
+.mic-controls button {
+  flex: 1;
+  padding: 0.8rem;
+  font-size: 1rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.start-btn {
+  background: linear-gradient(135deg, #4caf50, #66bb6a);
+  color: #fff;
+}
+
+.start-btn:hover {
+  background: linear-gradient(135deg, #388e3c, #4caf50);
+}
+
+.stop-btn {
+  background: linear-gradient(135deg, #f44336, #e57373);
+  color: #fff;
+}
+
+.stop-btn:hover {
+  background: linear-gradient(135deg, #d32f2f, #f44336);
+}
+
+.submit-btn {
+  padding: 1rem;
+  font-size: 1.2rem;
+  background: linear-gradient(135deg, #3f51b5, #5c6bc0);
+  color: #fff;
+  font-weight: bold;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.submit-btn:hover {
+  background: linear-gradient(135deg, #303f9f, #3f51b5);
+}
+
+.error {
+  color: #ff6f61;
+  font-size: 1rem;
+  background-color: rgba(255, 107, 107, 0.1);
+  padding: 0.5rem;
+  border: 1px solid #ff6f61;
+  border-radius: 8px;
+  text-align: center;
+}
+</style>

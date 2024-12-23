@@ -47,7 +47,7 @@ export function useAzureSpeechToText() {
     recognizer.recognized = (s, e) => {
       if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
         console.log(`识别完成: ${e.result.text}`);
-        userSpeech.value += e.result.text; // 添加到最终结果
+        userSpeech.value = e.result.text; // 添加到最终结果
       } else if (e.result.reason === SpeechSDK.ResultReason.NoMatch) {
         console.log("未匹配任何语音。");
       }

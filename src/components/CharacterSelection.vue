@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, defineEmits } from "vue";
+import { ref, defineEmits, onMounted, onBeforeUnmount } from "vue";
 
 const emit = defineEmits(["select"]);
 
@@ -19,6 +19,7 @@ const characters = [
 
 // 用于存储选中的角色
 const selectedCharacter = ref<string | null>(null);
+const focusedIndex = ref<number>(0);
 
 // 处理角色选择
 const selectCharacter = (name: string, description: string) => {
@@ -27,13 +28,33 @@ const selectCharacter = (name: string, description: string) => {
   const character = name + ": " + description;
   emit("select", character);
 };
+
+// 处理键盘导航
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === "ArrowDown") {
+    focusedIndex.value = (focusedIndex.value + 1) % characters.length;
+  } else if (event.key === "ArrowUp") {
+    focusedIndex.value = (focusedIndex.value - 1 + characters.length) % characters.length;
+  } else if (event.key === "Enter") {
+    const char = characters[focusedIndex.value];
+    selectCharacter(char.name, char.description);
+  }
+};
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+});
 </script>
 
 <template>
   <div class="character-selection">
     <h2 class="selection-title">Choose your character</h2>
     <ul class="character-list">
-      <li v-for="char in characters" :key="char.name" class="character-item">
+      <li v-for="(char, index) in characters" :key="char.name" class="character-item">
         <button
           :disabled="
             Boolean(selectedCharacter) && selectedCharacter !== char.name
@@ -43,7 +64,9 @@ const selectCharacter = (name: string, description: string) => {
           :class="{
             disabled:
               Boolean(selectedCharacter) && selectedCharacter !== char.name,
+            focused: focusedIndex === index
           }"
+          tabindex="0"
         >
           <!-- 头像容器 -->
           <div class="avatar-container">
@@ -123,7 +146,8 @@ const selectCharacter = (name: string, description: string) => {
 }
 
 /* 鼠标悬停时 */
-.character-button:hover:enabled {
+.character-button:hover:enabled,
+.character-button.focused {
   background: linear-gradient(135deg, #4e342e, #2a1e5c); /* 反转渐变 */
   box-shadow: 0 6px 15px rgba(0, 0, 0, 0.5);
   transform: scale(1.03);
@@ -152,7 +176,8 @@ const selectCharacter = (name: string, description: string) => {
 }
 
 /* 鼠标悬停时 */
-.character-button:hover .character-avatar {
+.character-button:hover .character-avatar,
+.character-button.focused .character-avatar {
   transform: scale(1.1); /* 放大效果 */
 }
 
